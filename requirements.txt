@@ -1,0 +1,31 @@
+# Telegram
+aiogram>=3.13.0
+aiohttp>=3.9.0
+
+# Database (SQLAlchemy 2.0 Async)
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+alembic>=1.14.0
+
+# Redis + Celery (Redis as broker & backend)
+redis>=5.2.0
+celery[redis]>=5.4.0
+
+# Config
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.1
+
+# Downloader & media
+yt-dlp>=2025.09.01
+ffmpeg-python>=0.2.0
+
+# Utils
+orjson>=3.10.0
+httpx>=0.28.0
+tenacity>=9.0.0
+structlog>=24.4.0
+
+# Optional (Local Bot API / MTProto later)
+# pyrogram>=2.0.0
+# telethon>=1.36.0

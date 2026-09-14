@@ -1,0 +1,131 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vdbot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-vdbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_strong_password}
+      POSTGRES_DB: ${POSTGRES_DB:-video_downloader}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vdbot} -d ${POSTGRES_DB:-video_downloader}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vdbot-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: vdbot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vdbot-net
+
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: vdbot-telegram-bot-api
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-0}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_LOCAL: 1
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    ports:
+      - "8081:8081"
+    networks:
+      - vdbot-net
+
+  # O'z-o'zida joylashtirilgan Cobalt server.
+  # Sabab: tasodifiy ochiq (public) Cobalt oynalari doim ishonchli emas —
+  # ular tez-tez o'chib qoladi yoki endi JWT/API-key autentifikatsiyasini
+  # talab qila boshlaydi (biz nazorat qila olmaydigan narsa). Bu konteyner
+  # faqat ichki tarmoqda (vdbot-net) ishlaydi, tashqariga ochiq emas, shuning
+  # uchun autentifikatsiya shart emas va to'liq bizning nazoratimizda.
+  cobalt:
+    image: ghcr.io/imputnet/cobalt:11
+    container_name: vdbot-cobalt
+    init: true
+    restart: unless-stopped
+    environment:
+      API_URL: "http://cobalt:9000/"
+    networks:
+      - vdbot-net
+
+  bot:
+    build: .
+    container_name: vdbot-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TELEGRAM_API_SERVER=http://telegram-bot-api:8081
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_DSN=postgresql+asyncpg://${POSTGRES_USER:-vdbot}:${POSTGRES_PASSWORD:-change_me_strong_password}@postgres:5432/${POSTGRES_DB:-video_downloader}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      telegram-bot-api:
+        condition: service_started
+    volumes:
+      - .:/app
+      - downloads_data:/tmp/downloads
+      - ./cookies:/app/cookies
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    networks:
+      - vdbot-net
+    command: python -m app.main
+
+  worker:
+    build: .
+    container_name: vdbot-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TELEGRAM_API_SERVER=http://telegram-bot-api:8081
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_DSN=postgresql+asyncpg://${POSTGRES_USER:-vdbot}:${POSTGRES_PASSWORD:-change_me_strong_password}@postgres:5432/${POSTGRES_DB:-video_downloader}
+      - COBALT_LOCAL_URL=http://cobalt:9000/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      telegram-bot-api:
+        condition: service_started
+      cobalt:
+        condition: service_started
+    volumes:
+      - .:/app
+      - downloads_data:/tmp/downloads
+      - ./cookies:/app/cookies
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
+    networks:
+      - vdbot-net
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 -Q downloads,celery
+
+volumes:
+  postgres_data:
+  redis_data:
+  telegram_bot_api_data:
+  downloads_data:
+
+networks:
+  vdbot-net:
+    driver: bridge
